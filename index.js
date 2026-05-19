@@ -30,6 +30,12 @@ const run = async () => {
     const doctorData = db.collection("doctorslist");
 
     app.get("/doctor", async (req, res) => {
+      const data = doctorData.find({ rating: 4.9 }).limit(3);
+      const result = await data.toArray();
+      res.send(result);
+    });
+
+    app.get("/doctors", async (req, res) => {
       const data = doctorData.find();
       const result = await data.toArray();
       res.send(result);
