@@ -28,6 +28,7 @@ const run = async () => {
 
     const db = client.db("doctors");
     const doctorData = db.collection("doctorslist");
+    const booking = db.collection("bookings");
 
     app.get("/doctor", async (req, res) => {
       const data = doctorData.find({ rating: 4.9 }).limit(3);
@@ -45,6 +46,12 @@ const run = async () => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await doctorData.findOne(query);
+      res.send(result);
+    });
+
+    app.post("/bookings", async (req, res) => {
+      const book = req.body;
+      const result = await booking.insertOne(book);
       res.send(result);
     });
 
