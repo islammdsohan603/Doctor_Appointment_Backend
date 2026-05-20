@@ -29,6 +29,7 @@ const run = async () => {
     const db = client.db("doctors");
     const doctorData = db.collection("doctorslist");
     const booking = db.collection("bookings");
+    const usersCollection = db.collection("users");
 
     app.get("/doctor", async (req, res) => {
       const data = doctorData.find({ rating: 4.9 }).limit(3);
@@ -70,7 +71,7 @@ const run = async () => {
     app.patch("/bookings/:id", async (req, res) => {
       const id = req.params.id;
       const updataBooking = req.body;
-      const query = { _id: new ObjectId(id) };
+      const query = { _id: id };
 
       const updatedDoc = {
         $set: updataBooking,
@@ -84,6 +85,40 @@ const run = async () => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await booking.deleteOne(query);
+      res.send(result);
+    });
+
+    app.post("/users", async (req, res) => {
+      const user = req.body;
+
+      const existingUser = await usersCollection.findOne({
+        email: user.email,
+      });
+
+      if (existingUser) {
+        return res.send({
+          message: "User already exists",
+        });
+      }
+
+      const result = await usersCollection.insertOne(user);
+
+      res.send(result);
+    });
+
+    app.patch("/users/:id", async (req, res) => {
+      const id = req.params.id;
+
+      const updataData = req.body;
+
+      const query = { _id: new ObjectId(id) };
+
+      const updataDoc = {
+        $set: updataData,
+      };
+
+      const result = await usersCollection.updateOne(query, updataDoc);
+
       res.send(result);
     });
 
