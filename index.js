@@ -1,4 +1,5 @@
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const { jwtVerify, createRemoteJWKSet } = require("jose-cjs");
 
 const express = require("express");
 const app = express();
@@ -22,6 +23,32 @@ const client = new MongoClient(uri, {
   },
 });
 
+const jwks = createRemoteJWKSet(new URL("http://localhost:3000/api/auth/jwks"));
+
+const verifyToken = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const token = authHeader.split(" ")[1];
+
+    if (!token) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const { payload } = await jwtVerify(token, jwks);
+
+    req.user = payload;
+
+    next();
+  } catch (error) {
+    return res.status(401).json({ message: "Invalid Token" });
+  }
+};
+
 const run = async () => {
   try {
     await client.connect();
@@ -43,7 +70,7 @@ const run = async () => {
       res.send(result);
     });
 
-    app.get("/doctors/:id", async (req, res) => {
+    app.get("/doctors/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await doctorData.findOne(query);
@@ -61,23 +88,19 @@ const run = async () => {
       const result = await data.toArray();
       res.send(result);
     });
-
-    app.post("/bookings", async (req, res) => {
-      const book = req.body;
-      const result = await booking.insertOne(destination);
-      res.send(result);
-    });
-
     app.patch("/bookings/:id", async (req, res) => {
       const id = req.params.id;
+
       const updataBooking = req.body;
-      const query = { _id: id };
+
+      const query = { _id: new ObjectId(id) };
 
       const updatedDoc = {
         $set: updataBooking,
       };
 
       const result = await booking.updateOne(query, updatedDoc);
+
       res.send(result);
     });
 
