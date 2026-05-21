@@ -85,11 +85,22 @@ const run = async () => {
       res.send(result);
     });
 
-    app.get("/bookings", async (req, res) => {
-      const data = booking.find();
-      const result = await data.toArray();
+    app.get("/bookings", verifyToken, async (req, res) => {
+      const email = req.query.email;
+
+      if (email !== req.user.email) {
+        return res.status(403).send({
+          message: "Forbidden Access",
+        });
+      }
+
+      const query = { email };
+
+      const result = await booking.find(query).toArray();
+
       res.send(result);
     });
+
     app.patch("/bookings/:id", async (req, res) => {
       const id = req.params.id;
 
