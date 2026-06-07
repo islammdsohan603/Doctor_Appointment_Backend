@@ -1,19 +1,26 @@
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const { jwtVerify, createRemoteJWKSet } = require("jose-cjs");
-
 const express = require("express");
-const app = express();
 const cors = require("cors");
 const dotenv = require("dotenv");
+
 dotenv.config();
 
-app.use(cors());
-
-app.use(express.json());
-
-const port = process.env.PORT;
-
+const app = express();
+const port = process.env.PORT || 5000;
 const uri = process.env.MONGO_URI;
+const clientUrl = process.env.CLIENT_URL;
+
+if (!uri) {
+  throw new Error("MONGO_URI is missing.");
+}
+
+if (!clientUrl) {
+  throw new Error("CLIENT_URL is missing.");
+}
+
+app.use(cors());
+app.use(express.json());
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -23,9 +30,43 @@ const client = new MongoClient(uri, {
   },
 });
 
-const jwks = createRemoteJWKSet(
-  new URL(`${process.env.CLIENT_URL}/api/auth/jwks`),
-);
+let db;
+let doctorData;
+let booking;
+let usersCollection;
+
+const jwks = createRemoteJWKSet(new URL(`${clientUrl}/api/auth/jwks`));
+
+const connectDb = async () => {
+  if (db) {
+    return db;
+  }
+
+  await client.connect();
+  db = client.db("doctors");
+  doctorData = db.collection("doctorslist");
+  booking = db.collection("bookings");
+  usersCollection = db.collection("users");
+
+  return db;
+};
+
+const asyncHandler = (handler) => async (req, res, next) => {
+  try {
+    await connectDb();
+    await handler(req, res, next);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const toObjectId = (id) => {
+  if (!ObjectId.isValid(id)) {
+    return null;
+  }
+
+  return new ObjectId(id);
+};
 
 const verifyToken = async (req, res, next) => {
   try {
@@ -42,7 +83,6 @@ const verifyToken = async (req, res, next) => {
     }
 
     const { payload } = await jwtVerify(token, jwks);
-
     req.user = payload;
 
     next();
@@ -51,128 +91,157 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
-const run = async () => {
-  try {
-    // await client.connect();
-
-    const db = client.db("doctors");
-    const doctorData = db.collection("doctorslist");
-    const booking = db.collection("bookings");
-    const usersCollection = db.collection("users");
-
-    app.get("/doctor", async (req, res) => {
-      const data = doctorData.find({ rating: 4.9 }).limit(3);
-      const result = await data.toArray();
-      res.send(result);
-    });
-
-    app.get("/doctors", async (req, res) => {
-      const data = doctorData.find();
-      const result = await data.toArray();
-      res.send(result);
-    });
-
-    app.get("/doctors/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await doctorData.findOne(query);
-      res.send(result);
-    });
-
-    app.post("/bookings", async (req, res) => {
-      const book = req.body;
-      const result = await booking.insertOne(book);
-      res.send(result);
-    });
-
-    app.get("/bookings", verifyToken, async (req, res) => {
-      const email = req.query.email;
-
-      if (email !== req.user.email) {
-        return res.status(403).send({
-          message: "Forbidden Access",
-        });
-      }
-
-      const query = { email };
-
-      const result = await booking.find(query).toArray();
-
-      res.send(result);
-    });
-
-    app.patch("/bookings/:id", async (req, res) => {
-      const id = req.params.id;
-
-      const updataBooking = req.body;
-
-      const query = { _id: new ObjectId(id) };
-
-      const updatedDoc = {
-        $set: updataBooking,
-      };
-
-      const result = await booking.updateOne(query, updatedDoc);
-
-      res.send(result);
-    });
-
-    app.delete("/bookings/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await booking.deleteOne(query);
-      res.send(result);
-    });
-
-    app.post("/users", async (req, res) => {
-      const user = req.body;
-
-      const existingUser = await usersCollection.findOne({
-        email: user.email,
-      });
-
-      if (existingUser) {
-        return res.send({
-          message: "User already exists",
-        });
-      }
-
-      const result = await usersCollection.insertOne(user);
-
-      res.send(result);
-    });
-
-    app.patch("/users/:id", async (req, res) => {
-      const id = req.params.id;
-
-      const updataData = req.body;
-
-      const query = { _id: new ObjectId(id) };
-
-      const updataDoc = {
-        $set: updataData,
-      };
-
-      const result = await usersCollection.updateOne(query, updataDoc);
-
-      res.send(result);
-    });
-
-    // await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!",
-    );
-  } catch (error) {
-    console.log(error);
-  }
-};
-
-run();
-
 app.get("/", (req, res) => {
-  res.send("Hello World");
+  res.json({ message: "Backend is running" });
 });
 
-app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
+app.get(
+  "/health",
+  asyncHandler(async (req, res) => {
+    await db.command({ ping: 1 });
+    res.json({ ok: true });
+  }),
+);
+
+app.get(
+  "/doctor",
+  asyncHandler(async (req, res) => {
+    const result = await doctorData.find({ rating: 4.9 }).limit(3).toArray();
+    res.json(result);
+  }),
+);
+
+app.get(
+  "/doctors",
+  asyncHandler(async (req, res) => {
+    const result = await doctorData.find().toArray();
+    res.json(result);
+  }),
+);
+
+app.get(
+  "/doctors/:id",
+  asyncHandler(async (req, res) => {
+    const objectId = toObjectId(req.params.id);
+
+    if (!objectId) {
+      return res.status(400).json({ message: "Invalid doctor id" });
+    }
+
+    const result = await doctorData.findOne({ _id: objectId });
+
+    if (!result) {
+      return res.status(404).json({ message: "Doctor not found" });
+    }
+
+    res.json(result);
+  }),
+);
+
+app.post(
+  "/bookings",
+  asyncHandler(async (req, res) => {
+    const result = await booking.insertOne(req.body);
+    res.json(result);
+  }),
+);
+
+app.get(
+  "/bookings",
+  verifyToken,
+  asyncHandler(async (req, res) => {
+    const email = req.query.email;
+
+    if (email !== req.user.email) {
+      return res.status(403).json({ message: "Forbidden Access" });
+    }
+
+    const result = await booking.find({ email }).toArray();
+    res.json(result);
+  }),
+);
+
+app.patch(
+  "/bookings/:id",
+  asyncHandler(async (req, res) => {
+    const objectId = toObjectId(req.params.id);
+
+    if (!objectId) {
+      return res.status(400).json({ message: "Invalid booking id" });
+    }
+
+    const result = await booking.updateOne(
+      { _id: objectId },
+      { $set: req.body },
+    );
+
+    res.json(result);
+  }),
+);
+
+app.delete(
+  "/bookings/:id",
+  asyncHandler(async (req, res) => {
+    const objectId = toObjectId(req.params.id);
+
+    if (!objectId) {
+      return res.status(400).json({ message: "Invalid booking id" });
+    }
+
+    const result = await booking.deleteOne({ _id: objectId });
+    res.json(result);
+  }),
+);
+
+app.post(
+  "/users",
+  asyncHandler(async (req, res) => {
+    const user = req.body;
+    const existingUser = await usersCollection.findOne({ email: user.email });
+
+    if (existingUser) {
+      return res.json({ message: "User already exists" });
+    }
+
+    const result = await usersCollection.insertOne(user);
+    res.json(result);
+  }),
+);
+
+app.patch(
+  "/users/:id",
+  asyncHandler(async (req, res) => {
+    const objectId = toObjectId(req.params.id);
+
+    if (!objectId) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+
+    const result = await usersCollection.updateOne(
+      { _id: objectId },
+      { $set: req.body },
+    );
+
+    res.json(result);
+  }),
+);
+
+app.use((error, req, res, next) => {
+  console.error(error);
+
+  if (res.headersSent) {
+    return next(error);
+  }
+
+  res.status(500).json({
+    message: "Internal server error",
+  });
 });
+
+if (process.env.NODE_ENV !== "production") {
+  app.listen(port, () => {
+    console.log(`Example app listening on port ${port}`);
+  });
+}
+
+module.exports = app;
